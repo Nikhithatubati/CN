@@ -1,23 +1,22 @@
 import subprocess
 import os
 import argparse
-from datetime import datetime
-import time, random
-import json
+import random
 import shutil
-from statistics import mean, median
+import json
 import matplotlib.pyplot as plt
 import matplotlib.patches as Patch
-folder ='tr_test'
+folder = 'ping_test'
 
-def trace(destination, max_hops, i):
+def ping(destination, count, delay):
     try:
-        trace_out = subprocess.check_output(['traceroute', destination], universal_newlines = True)
-        lines = trace_out.strip().split('\n')
+        ping_out = subprocess.check_output(['ping', '-c', str(count), '-i', str(delay), destination], universal_newlines = True)
+        lines = ping_out.strip().split('\n')
         if not os.path.exists(folder):
             os.mkdir(folder)
-        filename = "tr_" + str(i+1) + ".out"
+        filename = "ping.out"
         file_path = os.path.join(folder, filename)
+
         with open(file_path, "w") as file:
             for line in lines:
                 file.write(line + "\n")
@@ -34,49 +33,39 @@ def parsing(location):
             if os.path.isfile(file_path):
                 with open(file_path, "r") as file:
                     file_content = file.read().strip().split("\n")
+                    key = 1
                     for line in file_content[1:]:
+                        #print(line)
                         ele = line.split()
-                        key = int(ele[0])
-                        if ele[1] != '*':
-                            host=ele[1]
-                        t=[]
-                        for i in range(2, len(ele)):
-                            if ele[i] != '*':
-                                t.append(float(ele[i][0:5]))
-                        data_host[key] = host
-                        if key in data_vals:
-                            data_vals[key].extend(t)
-                        else:
-                            data_vals[key] = t
-        data_val = {}
-        for x in data_vals:
-            l = []
-            for y in data_vals[x]:
-                l.append(float(y))
-            data_val[x] = l
-        return(data_host, data_val)
+                        if key <= 10:
+                            host = ele[4][1:-2:]
+                            time = float(ele[len(ele)-2][5::])
+                            data_host[key] = host
+                            data_vals[key] = [time]
+                            key = key + 1
+                        if len(ele) != 0 and ele[0]=='rtt':
+                            t = ele[3].split("/")
+                            print(t)
+        return (data_host, data_vals)
     else:
-        print("The folder does not exist.")
+        print("The folder does not exist")
 
 def json_writer(d1, d2, k=" "):
     trace_data = []
     for (x,y),(a,b) in zip(d1.items(), d2.items()):
         data={
-                'avg': round(mean(b),3),
-                'hop': x,
+                'packet': x,
                 'host': y,
-                'max': round(max(b), 3),
-                'med': round(median(b), 3),
-                'min': round(min(b), 3)
+                'time': b
             }
         trace_data.append(data)
     file_name = " "
     if (k==" "):
-        file_name = "tr_data.json"
+        file_name = "ping_data.json"
     elif (os.path.exists(k)):
-        file_name = k+"/tr_data.json"
+        file_name = k+"/ping_data.json"
     elif not os.path.exists(k):
-        file_name = "tr_data.json"
+        file_name = "ping_data.json"
     json_data = json.dumps(trace_data, indent = 4)
     with open(file_name, "w") as json_file:
         json_file.write(json_data)
@@ -84,10 +73,10 @@ def json_writer(d1, d2, k=" "):
 
 def graph_plotter(d, k=" "):
     data_lists = list(d.values())
-    labels = list("hop" + str(i) for i in d.keys())
+    labels = list("packet" + str(i) for i in d.keys())
     colors = [plt.cm.jet(random.random()) for i in d.keys()]
     plt.figure(figsize=(10, 10))
-    a = plt.boxplot(data_lists, labels=labels, patch_artist=True, showmeans = True, showfliers=True)
+    a = plt.boxplot(data_lists, labels=labels, patch_artist=True, showmeans = True)
     p = [i[0:3] for i in colors]
     lamba = [Patch.Patch(color=color, label=label) for color, label in zip(p, labels)]
     plt.legend(handles = lamba)
@@ -103,20 +92,19 @@ def graph_plotter(d, k=" "):
     plt.xlabel('Hops')
     plt.ylabel('Latency')
     if (k==" "):
-        plt.savefig('tr_output.pdf')
+        plt.savefig('ping_output.pdf')
     elif (os.path.exists(k)):
-        plt.savefig(k+'/tr_output.pdf')
+        plt.savefig(k+'/ping_output.pdf')
     elif not os.path.exists(k):
-        plt.savefig('tr_output.pdf')
+        plt.savefig('ping_output.pdf')
         print("The given location is not valid and the file is saved in current working directory")
     print("The graph has been saved")
 
-def trstats():
+def pingstats():
     parser = argparse.ArgumentParser(description="Trace the route to a destination host or IP address.")
     parser.add_argument("-t", dest="Target", type=str, help="Host or IP address to trace to.")
-    parser.add_argument("-n", dest="Num_Runs", type=int, default=5, help="Number of times traceroute will run")
-    parser.add_argument("-d", dest="Run_Delay", type=int, default=2, help="Number of seconds to wait between two consecutive runs")
-    parser.add_argument("-m", dest="Max_Hops", type=int, default=30, help="Maximum number of hops (default: 30).")
+    parser.add_argument("-d", dest="delay", type=int, default=2, help="Number of seconds to wait between two consecutive ping packets")
+    parser.add_argument("-m", dest="Max_pings", type=int, default=10, help="Maximum number of ping packets (default: 30).")
     parser.add_argument("-o", dest="Output", default=" ", help="Path and name of output JSON file containing the stats")
     parser.add_argument("-g", dest="Graph", default=" ", help="Path and nameof output PDF file containing stats graph")
     parser.add_argument("--test", dest="Test_Dir", type=str, help="Directory containing num_runs text files, each of whihc contains the outptu of a traceroute run. If present, this will override all other options and traceroute will not be invoked. Stats will be computed over the traceroute output stored in the text files")
@@ -124,29 +112,29 @@ def trstats():
     args = parser.parse_args()
 
     if args.Test_Dir:
+        #parsing(folder)
         d1,d2 = parsing(args.Test_Dir)
-        y1={x:y for x,y in d1.items() if y!=[]}
-        y2={x:y for x,y in d2.items() if y!=[]}
-        json_writer(y1,y2,args.Output)
-        graph_plotter(y2,args.Graph)
+        #y1={x:y for x,y in d1.items() if y!=[]}
+        #y2={x:y for x,y in d2.items() if y!=[]}
+        json_writer(d1,d2,args.Output)
+        graph_plotter(d2,args.Graph)
     elif args.Target:
         if os.path.exists(folder):
             shutil.rmtree(folder)
-        for i in range(int(args.Num_Runs)):
-            trace(args.Target,args.Max_Hops, i)
-            time.sleep(int(args.Run_Delay))
+        ping(args.Target,args.Max_pings, args.delay)
+        #parsing(folder)
         d1,d2 = parsing(folder)
-        y1={x:y for x,y in d1.items() if y!=[]}
-        y2={x:y for x,y in d2.items() if y!=[]}
-        json_writer(y1,y2,args.Output)
-        graph_plotter(y2,args.Graph)
+        #y1={x:y for x,y in d1.items() if y!=[]}
+        #y2={x:y for x,y in d2.items() if y!=[]}
+        json_writer(d1,d2,args.Output)
+        graph_plotter(d2,args.Graph)
     elif not args.Target:
         print("use -t to provide url")
         exit
     if not args.Output:
-        print("The location of the file is /home/student/Tubati_trstats and the name is tr_data.json")
+        print("The location of the file is /home/student/Tubati_trstats and the name is data.json")
     if not args.Graph:
-        print("The location of the file is /home/student/Tubati_trstats and the name is tr_output.pdf")
+        print("The location of the file is /home/student/Tubati_trstats and the name is output.pdf")
 
 if __name__ == "__main__":
-    trstats()
+    pingstats()
